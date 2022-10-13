@@ -1,1 +1,1 @@
-# quanX_zmsml
+自用圈X规则
