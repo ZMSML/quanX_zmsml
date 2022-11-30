@@ -15,7 +15,7 @@
 [rewrite_local]
 
 # ～ Stay（2022-10-17）@ddgksf2013
-^https?:\/\/api\.shenyin\.name\/stay-fork\/browse\/featured$ url script-response-body https://github.com/ddgksf2013/Scripts/raw/main/stay.js
+^https?:\/\/api\.shenyin\.name\/stay-fork\/browse\/featured$ url script-response-body https://raw.githubusercontent.com/ZMSML/quanX_zmsml/main/scripts/stay.js
 
 [mitm]
 
