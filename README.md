@@ -1,1 +1,1 @@
-自用圈X规则
+Just For Myself
