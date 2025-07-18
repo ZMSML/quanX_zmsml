@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         京东订单全自动支付流程 (含网络命令刷新) - 控制修复版
 // @namespace    http://tampermonkey.net/
-// @version      7.7
+// @version      7.9
 // @description  全自动京东订单流程：1. 监听网络命令并以随机延迟刷新订单列表页（防风控）。2. 自动点击“订单详情”->“付款”->“微信支付”。3. 自动解析二维码并推送到微信。4. 持续刷新失效的二维码。
 // @author       Gemini (修改 by User)
 // @match        https://order.jd.com/center/list*?s=1*
@@ -11,6 +11,7 @@
 // @require      https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js
 // @grant        GM_xmlhttpRequest
 // @connect      117.72.49.115
+// @connect      bert.vip
 // @run-at       document-idle
 // ==/UserScript==
 
