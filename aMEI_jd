@@ -1,0 +1,279 @@
+// ==UserScript==
+// @name         京东订单全自动支付流程 (含网络命令刷新) - 控制修复版
+// @namespace    http://tampermonkey.net/
+// @version      7.9
+// @description  全自动京东订单流程：1. 监听网络命令并以随机延迟刷新订单列表页（防风控）。2. 自动点击“订单详情”->“付款”->“微信支付”。3. 自动解析二维码并推送到微信。4. 持续刷新失效的二维码。
+// @author       Gemini (修改 by User)
+// @match        https://order.jd.com/center/list*?s=1*
+// @match        https://details.jd.com/normal/item.action*
+// @match        https://payc.m.jd.com/d/cashier*
+// @match        https://pcashier.jd.com/weixin/weixinPage*
+// @require      https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js
+// @grant        GM_xmlhttpRequest
+// @connect      117.72.49.115
+// @connect      bert.vip
+// @run-at       document-idle
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // ===================================================================
+    // C O N F I G U R A T I O N  -  请在这里配置
+    // ===================================================================
+
+    // 0. 总开关: 设置为 false 可以禁用所有自动点击和页面跳转，但保留网络命令刷新和二维码处理功能。
+    const AUTOMATION_ENABLED = true;
+
+    // --- 防风控刷新延迟 ---
+    // 为了防止多个浏览器同时刷新导致京东风控，在这里设置一个随机的延迟范围（单位：秒）。
+    // 如果想使用固定延迟，请将最小值和最大值设置为相同。
+    const MIN_REFRESH_DELAY_SECONDS = 1;  // 最小延迟时间（秒）
+    const MAX_REFRESH_DELAY_SECONDS = 20; // 最大延迟时间（秒）
+
+    // 1. 微信app推送目标用户名: 请将 'chen' 替换为你的目标用户名
+    const TO_USER = 'amei';
+
+    // 2. 推送接口SendKey: 这是 push.bert.vip 接口的凭证（请勿修改）
+    const SEND_KEY = 'hmrpush9527';
+
+    // 3. 网络命令接口地址（请勿修改）
+    const COMMAND_API_URL = 'http://117.72.49.115:5078/getStatus';
+
+    // 4. 轮询间隔（毫秒），即每隔多久请求一次网络命令接口（请勿修改）
+    const POLLING_INTERVAL = 2000;
+
+    // ===================================================================
+    // E N D  O F  C O N F I G U R A T I O N
+    // ===================================================================
+
+
+    // --- 全局变量和辅助函数 ---
+
+    const clickDelay = 1000;
+    const currentPageUrl = window.location.href;
+    console.log(`京东订单全自动流程脚本 v7.5 已启动，当前页面: ${currentPageUrl}`);
+    console.log(`自动化点击总开关状态: ${AUTOMATION_ENABLED ? '开启' : '关闭'}`);
+    console.log(`防风控刷新延迟范围: ${MIN_REFRESH_DELAY_SECONDS} - ${MAX_REFRESH_DELAY_SECONDS} 秒`);
+
+    let lastRetime = null;
+
+    function waitForElement(selector, description, action) {
+        console.log(`正在等待“${description}”出现...`);
+        const interval = setInterval(() => {
+            const element = document.querySelector(selector);
+            if (element && window.getComputedStyle(element).display !== 'none') {
+                console.log(`成功找到“${description}”！`);
+                clearInterval(interval);
+                action(element);
+            }
+        }, 500);
+    }
+
+    function sendWechatNotification(qrCodeText) {
+        if (!TO_USER || TO_USER === 'YOUR_USERNAME') {
+            console.error('推送失败：请在脚本顶部配置您的 TO_USER (目标用户名)！');
+            return;
+        }
+        if (!qrCodeText) {
+            console.error('推送失败：二维码解析文本为空。');
+            return;
+        }
+
+        const encodedText = encodeURIComponent(qrCodeText);
+        const pushUrl = `http://push.bert.vip/?sendkey=${SEND_KEY}&text=${encodedText}&touser=${TO_USER}`;
+
+        console.log(`准备将二维码文本推送到用户: ${TO_USER}`);
+        console.log(`正在请求推送URL: ${pushUrl}`);
+
+        GM_xmlhttpRequest({
+            method: "GET",
+            url: pushUrl,
+            onload: function(response) {
+                console.log('微信推送成功！响应:', response.responseText);
+            },
+            onerror: function(response) {
+                console.error('微信推送失败！错误详情:', response);
+            }
+        });
+    }
+
+    function decodeQrAndSend(imageUrl) {
+        console.log('正在获取二维码图片:', imageUrl);
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: imageUrl,
+            responseType: 'blob',
+            onload: function(response) {
+                const img = new Image();
+                img.crossOrigin = "Anonymous";
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, img.width, img.height);
+                    const imageData = ctx.getImageData(0, 0, img.width, img.height);
+                    const code = jsQR(imageData.data, imageData.width, imageData.height);
+
+                    if (code && code.data) {
+                        console.log('二维码解析成功:', code.data);
+                        sendWechatNotification(code.data);
+                    } else {
+                        console.error('二维码解析失败。');
+                    }
+                };
+                img.onerror = () => {
+                    console.error('加载通过Blob创建的图片失败。');
+                };
+                img.src = URL.createObjectURL(response.response);
+            },
+            onerror: function() {
+                console.error('获取二维码图片失败，可能是网络问题或CORS策略。');
+            }
+        });
+    }
+
+    /**
+     * 轮询网络命令接口，检查刷新指令 (已修复刷新逻辑)
+     */
+    function pollForCommands() {
+        console.log('开始监听网络刷新命令...');
+        // 将轮询任务赋值给一个变量，以便后续可以清除它
+        const pollIntervalId = setInterval(() => {
+            GM_xmlhttpRequest({
+                method: "GET",
+                url: COMMAND_API_URL,
+                onload: function(response) {
+                    try {
+                        const data = JSON.parse(response.responseText);
+                        const command = data.find(item => item.who === 'openWeb');
+
+                        if (command) {
+                            const newRetime = command.data.retime;
+                            console.log(`获取到retime: ${newRetime}, 上一次retime: ${lastRetime}`);
+
+                            if (lastRetime === null) {
+                                lastRetime = newRetime;
+                                console.log('首次初始化retime值。');
+                                return;
+                            }
+
+                            // --- 修复后的逻辑 ---
+                            if (newRetime !== lastRetime) {
+                                // 1. 检测到刷新指令后，立即停止轮询，防止重复操作
+                                clearInterval(pollIntervalId);
+                                console.log('检测到刷新指令，已停止轮询任务。');
+
+                                // 2. 计算随机延迟
+                                const delaySeconds = Math.random() * (MAX_REFRESH_DELAY_SECONDS - MIN_REFRESH_DELAY_SECONDS) + MIN_REFRESH_DELAY_SECONDS;
+                                const delayMilliseconds = Math.round(delaySeconds * 1000);
+
+                                console.log(`为防止风控，将在 ${delaySeconds.toFixed(2)} 秒后刷新页面...`);
+
+                                // 3. 在延迟后执行刷新
+                                setTimeout(() => {
+                                    console.log('延迟结束，立即刷新！');
+                                    window.location.reload();
+                                }, delayMilliseconds);
+                            }
+                        }
+                    } catch (e) {
+                        console.error('解析网络命令接口响应失败:', e);
+                    }
+                },
+                onerror: function(error) {
+                    console.error('请求网络命令接口失败:', error);
+                }
+            });
+        }, POLLING_INTERVAL);
+    }
+
+
+    // --- 页面逻辑判断 ---
+
+    // 逻辑 1: “我的订单”列表页面
+    if (currentPageUrl.includes('order.jd.com/center/list')) {
+        pollForCommands();
+        waitForElement('.status a[clstag*="dingdanxiangqing"]', '订单详情', (element) => {
+            if (AUTOMATION_ENABLED) {
+                console.log('自动化已启用，即将点击“订单详情”。');
+                setTimeout(() => { element.click(); }, clickDelay);
+            } else {
+                console.log('自动化已禁用，脚本将不会自动点击“订单详情”。');
+            }
+        });
+    }
+
+    // 逻辑 2: “订单详情”页面
+    else if (currentPageUrl.includes('details.jd.com/normal/item.action')) {
+        waitForElement('a[id^="pay-button-"]', '付款', (element) => {
+            if (AUTOMATION_ENABLED) {
+                console.log('自动化已启用，即将点击“付款”。');
+                setTimeout(() => { element.click(); }, clickDelay);
+            } else {
+                console.log('自动化已禁用，脚本将不会自动点击“付款”。');
+            }
+        });
+    }
+
+    // 逻辑 3: “收银台”页面
+    else if (currentPageUrl.includes('payc.m.jd.com/d/cashier/')) {
+        waitForElement('div[clstag*="payPlatForm_weixin"] .plate-form-entry', '微信支付', (wechatPayButton) => {
+            if (AUTOMATION_ENABLED) {
+                console.log('自动化已启用，即将点击“微信支付”。');
+                setTimeout(() => {
+                    wechatPayButton.click();
+                    waitForElement('.pay-button-wrapper .base-button', '立即支付', (finalPayButton) => {
+                        setTimeout(() => { finalPayButton.click(); }, 500);
+                    });
+                }, clickDelay);
+            } else {
+                console.log('自动化已禁用，脚本将不会自动点击“微信支付”。');
+            }
+        });
+    }
+
+    // 逻辑 4: “微信支付二维码”页面
+    else if (currentPageUrl.includes('pcashier.jd.com/weixin/weixinPage')) {
+        let lastQrCodeSrc = '';
+        let isRefreshing = false;
+
+        setInterval(() => {
+            const retryContainer = document.querySelector('.j_weixiRetry');
+            if (retryContainer && window.getComputedStyle(retryContainer).display !== 'none' && !isRefreshing) {
+                const refreshLink = retryContainer.querySelector('a.j_weixiRetryButton');
+                if (refreshLink) {
+                    console.log('检测到二维码已过期，准备自动点击刷新...');
+                    isRefreshing = true;
+                    console.log('刷新锁已激活，防止重复点击。');
+                    refreshLink.click();
+                }
+            }
+        }, 1000);
+
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                if (mutation.type === 'attributes' && mutation.attributeName === 'src') {
+                    const newSrc = mutation.target.src;
+                    if (newSrc && newSrc.includes('getWeixinImage') && newSrc !== lastQrCodeSrc) {
+                        lastQrCodeSrc = newSrc;
+                        console.log('检测到新的二维码，准备解析...');
+                        isRefreshing = false;
+                        console.log('刷新锁已释放。');
+                        setTimeout(() => decodeQrAndSend(newSrc), 500);
+                    }
+                }
+            });
+        });
+
+        waitForElement('#weixinImageUrl', '微信支付二维码', (qrImage) => {
+            observer.observe(qrImage, { attributes: true });
+            if (qrImage.src && qrImage.src.includes('getWeixinImage')) {
+                 lastQrCodeSrc = qrImage.src;
+                 decodeQrAndSend(qrImage.src);
+            }
+        });
+    }
+
+})();
