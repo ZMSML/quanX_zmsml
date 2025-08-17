@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         京东订单全自动支付流程 (含网络命令刷新) - 控制修复版
 // @namespace    http://tampermonkey.net/
-// @version      7.9
+// @version      8.0
 // @description  全自动京东订单流程：1. 监听网络命令并以随机延迟刷新订单列表页（防风控）。2. 自动点击“订单详情”->“付款”->“微信支付”。3. 自动解析二维码并推送到微信。4. 持续刷新失效的二维码。
 // @author       Gemini (修改 by User)
 // @match        https://order.jd.com/center/list*?s=1*
@@ -31,7 +31,7 @@
     const MIN_REFRESH_DELAY_SECONDS = 1;  // 最小延迟时间（秒）
     const MAX_REFRESH_DELAY_SECONDS = 20; // 最大延迟时间（秒）
 
-    // 1. 微信app推送目标用户名: 请将 'chen' 替换为你的目标用户名
+    // 1. 微信app推送目标用户名: 请将 'chen88888' 替换为你的目标用户名
     const TO_USER = 'zmsml';
 
     // 2. 推送接口SendKey: 这是 push.bert.vip 接口的凭证（请勿修改）
@@ -52,7 +52,7 @@
 
     const clickDelay = 1000;
     const currentPageUrl = window.location.href;
-    console.log(`京东订单全自动流程脚本 v7.5 已启动，当前页面: ${currentPageUrl}`);
+    console.log(`京东订单全自动流程脚本 v8.0 已启动，当前页面: ${currentPageUrl}`);
     console.log(`自动化点击总开关状态: ${AUTOMATION_ENABLED ? '开启' : '关闭'}`);
     console.log(`防风控刷新延迟范围: ${MIN_REFRESH_DELAY_SECONDS} - ${MAX_REFRESH_DELAY_SECONDS} 秒`);
 
@@ -70,6 +70,10 @@
         }, 500);
     }
 
+    /**
+     * @description 修改后的微信通知函数
+     * @param {string} qrCodeText - 从二维码解析出的原始文本
+     */
     function sendWechatNotification(qrCodeText) {
         if (!TO_USER || TO_USER === 'YOUR_USERNAME') {
             console.error('推送失败：请在脚本顶部配置您的 TO_USER (目标用户名)！');
@@ -80,10 +84,30 @@
             return;
         }
 
-        const encodedText = encodeURIComponent(qrCodeText);
+        // --- 开始修改: 构造新的推送文案 ---
+
+        // 1. 获取当前北京时间 (格式: HH:mm:ss)
+        const beijingTime = new Date().toLocaleTimeString('zh-CN', {
+            timeZone: 'Asia/Shanghai', // 指定时区为北京时间
+            hour12: false, // 使用24小时制
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+
+        // 2. 按照 "推送时间：HH:mm:ss\n[二维码内容]" 的格式拼接新的推送内容
+        //    注意: \n 将在URL编码后变成 %0A
+        const pushText = `推送时间：${beijingTime}\n${qrCodeText}`;
+
+        // 3. 对包含换行符的完整内容进行URL编码
+        const encodedText = encodeURIComponent(pushText);
+
+        // --- 结束修改 ---
+
         const pushUrl = `http://push.bert.vip/?sendkey=${SEND_KEY}&text=${encodedText}&touser=${TO_USER}`;
 
         console.log(`准备将二维码文本推送到用户: ${TO_USER}`);
+        console.log(`推送原文: \n${pushText}`); // 打印编码前的内容，方便调试
         console.log(`正在请求推送URL: ${pushUrl}`);
 
         GM_xmlhttpRequest({
